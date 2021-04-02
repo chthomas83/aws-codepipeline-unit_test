@@ -1,0 +1,331 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CodePipeline and CodeBuild for continuous delivery of a single application to S3
+##########################################################################
+#This Template is a serverless architecture using CI\CD CF Lambda ACM S3 SNS
+##########################################################################
+Parameters:
+  Environment:
+    Description: sandpit,nonprod,prod
+    Type: String
+    AllowedValues:
+      - sandpit
+      - nonprod
+      - prod
+###############################################################
+# Todo: hard-code below before deployment to any Environment
+# Github Repo details to be inserted
+################################################################
+  SiteBucketName:
+    Type: String
+    Description: Name of bucket to create to host the website
+  GithubOwner:
+    Type: String
+    Description: Github User Name / Org name that own the repo
+  GithubPAT:
+    NoEcho: true
+    Type: String
+    Description: Personal Access Token for Github access
+  GithubRepoName:
+    Type: String
+    Description: Repo name on Github
+  GithubRepoBranch:
+    Type: String
+    Description: Github repo branch
+#########################################################
+#This is only needed if Lambda is used for sending email 
+######################################################### 
+  APIAddress:
+    Type: String
+    Description: API Gateway endpoint for sending email (custom origin for cloudfront), eg 63uezs2xfe.execute-api.ap-southeast-2.amazonaws.com
+
+Resources:
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - codebuild.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: codebuild-service
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action: "*"
+            Resource: "*"
+          Version: '2012-10-17'
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - codepipeline.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: codepipeline-service
+        PolicyDocument:
+          Statement:
+          - Action:
+            - codebuild:*
+            Resource: "*"
+            Effect: Allow
+          - Action:
+            - s3:GetObject
+            - s3:GetObjectVersion
+            - s3:GetBucketVersioning
+            Resource: "*"
+            Effect: Allow
+          - Action:
+            - s3:PutObject
+            Resource:
+            - arn:aws:s3:::codepipeline*
+            Effect: Allow
+          - Action:
+            - s3:*
+            - cloudformation:*
+            - iam:PassRole
+            Resource: "*"
+            Effect: Allow
+          Version: '2012-10-17'
+  PipelineBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+  CloudFrontDist:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        IPV6Enabled: 'false'
+        Origins:
+        - DomainName: !Sub ${SiteBucketName}.s3.amazonaws.com
+          Id: myS3Origin
+          S3OriginConfig:
+            OriginAccessIdentity:
+              !Join [ "", [ "origin-access-identity/cloudfront/", !Ref SiteCloudFrontOriginAccessIdentity ] ]
+        - DomainName: !Sub website-documents-${Environment}.s3.amazonaws.com
+          Id: attachmentOrigin
+          S3OriginConfig:
+            OriginAccessIdentity:
+              !Join [ "", [ "origin-access-identity/cloudfront/", !Ref AttachmentCloudFrontOriginAccessIdentity ] ]
+              #This only needed if Lambda is used in this website for any email or sms notifications
+        - DomainName: !Ref APIAddress
+          Id: apiOrigin
+          CustomOriginConfig:
+            OriginProtocolPolicy: https-only
+            OriginSSLProtocols:
+            - TLSv1
+            - SSLv3
+          OriginPath: "/Prod"
+        Enabled: 'true'
+        CacheBehaviors:
+          - AllowedMethods:
+            - DELETE
+            - GET
+            - HEAD
+            - OPTIONS
+            - PATCH
+            - POST
+            - PUT
+            ForwardedValues:
+              QueryString: 'true'
+              Cookies:
+                Forward: none
+            PathPattern: "/*service/*"
+            TargetOriginId: "apiOrigin"
+            ViewerProtocolPolicy: redirect-to-https
+          - AllowedMethods:
+            - DELETE
+            - GET
+            - HEAD
+            - OPTIONS
+            - PATCH
+            - POST
+            - PUT
+            ForwardedValues:
+              QueryString: 'true'
+              Cookies:
+                Forward: none
+            PathPattern: "/attachments/*"
+            TargetOriginId: "attachmentOrigin"
+            ViewerProtocolPolicy: redirect-to-https
+        DefaultCacheBehavior:
+          AllowedMethods:
+          - DELETE
+          - GET
+          - HEAD
+          - OPTIONS
+          - PATCH
+          - POST
+          - PUT
+          TargetOriginId: myS3Origin
+          ForwardedValues:
+            QueryString: 'false'
+            Cookies:
+              Forward: none
+          ViewerProtocolPolicy: redirect-to-https
+        PriceClass: PriceClass_All
+        CustomErrorResponses:
+        - ErrorCachingMinTTL: '300'
+          ErrorCode: '400'
+          ResponseCode: '200'
+          ResponsePagePath: "/index.html"
+        - ErrorCachingMinTTL: '300'
+          ErrorCode: '403'
+          ResponseCode: '200'
+          ResponsePagePath: "/index.html"
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: 'true'
+  SiteCloudFrontOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub 'CloudFront OAI for ${SiteBucketName}'
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Statement:
+          -
+            Action:
+              - s3:GetObject
+            Effect: Allow
+            Resource: !Join [ "", [ "arn:aws:s3:::", !Ref SiteBucket, "/*" ] ]
+            Principal:
+              CanonicalUser: !GetAtt SiteCloudFrontOriginAccessIdentity.S3CanonicalUserId
+  AttachmentCloudFrontOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub 'CloudFront OAI for website-documents-${Environment}'
+
+  CodeBuildDeploySite:
+    Type: AWS::CodeBuild::Project
+    DependsOn: CodeBuildRole
+    Properties:
+      Name: !Sub ${AWS::StackName}-DeploySite
+      Description: Deploy site to S3
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      #Environment:
+        #Type: LINUX_CONTAINER
+        #ComputeType: BUILD_GENERAL1_SMALL
+        #Image: aws/codebuild
+      #Source:
+        #Type: CODEPIPELINE
+        #BuildSpec: !Sub |
+          #version: 0.1
+          #phases:
+            #build:
+              #commands:
+                # Builds Wordpress application.
+            post_build:
+              commands:
+                - aws s3 rm s3://${SiteBucketName}/ --recursive
+                - aws s3 cp --recursive --acl public-read ./dist/dev-web-website s3://${SiteBucketName}/
+                - aws cloudfront create-invalidation --distribution-id ${CloudFrontDist} --paths "/index.html"
+          artifacts:
+            files:
+                - '**/*'
+            discard-paths: yes
+            base-directory: 'dist*'
+      TimeoutInMinutes: 10
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      Stages:
+      - Name: Source
+        Actions:
+        - InputArtifacts: []
+          Name: dev-web-website-pipeline
+          ActionTypeId:
+            Category: Source
+            Owner: ThirdParty
+            Version: '1'
+            Provider: GitHub
+          OutputArtifacts:
+          - Name: SourceOutput
+          Configuration:
+            Owner: !Ref GithubOwner
+            Repo: !Ref GithubRepoName
+            Branch: !Ref GithubRepoBranch
+            OAuthToken: !Ref GithubPAT
+          RunOrder: 1
+      - Name: Deploy
+        Actions:
+        - Name: Artifact
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Version: '1'
+            Provider: CodeBuild
+          InputArtifacts:
+          - Name: SourceOutput
+          OutputArtifacts:
+          - Name: DeployOutput
+          Configuration:
+            ProjectName: !Ref CodeBuildDeploySite
+          RunOrder: 1
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineBucket
+
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      AccessControl: Private
+      BucketName: !Ref SiteBucketName
+      WebsiteConfiguration:
+        IndexDocument: index.html
+
+  AttachmentBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      AccessControl: Private
+      BucketName: !Sub "website-documents-${Environment}"
+#########################################################
+#This is only needed if Lambda is used for sending email 
+######################################################### 
+      NotificationConfiguration:
+        TopicConfigurations:
+          - Event: s3:ObjectCreated:Put
+            Topic: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:website-documents-${Environment}-fileAddedOrRemoved-topic
+          - Event: s3:ObjectRemoved:Delete
+            Topic: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:website-documents-${Environment}-fileAddedOrRemoved-topic
+
+  AttachmentBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AttachmentBucket
+      PolicyDocument:
+        Statement:
+          - Action:
+              - s3:GetObject
+              - s3:PutObject
+            Effect: Allow
+            Resource: !Join [ "", [ "arn:aws:s3:::", !Ref AttachmentBucket, "/*" ] ]
+            Principal:
+              CanonicalUser: !GetAtt AttachmentCloudFrontOriginAccessIdentity.S3CanonicalUserId
+
+Outputs:
+  PipelineUrl:
+    Value: !Sub https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${Pipeline}
+    Description: CodePipeline URL
+  SiteUrl:
+    Value: !GetAtt [SiteBucket, WebsiteURL]
+    Description: S3 Website URL
+---

@@ -1,0 +1,132 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: SydneyMetro - Cognito SSO
+
+Parameters:
+  CognitoFriendlyName:
+    Type: String
+    Description: A string used in all names of resources created within Cognito
+    AllowedPattern: '[\w]*'
+    ConstraintDescription: "Must not have spaces or special characters"
+
+  env:
+    Type: String
+    Default: sandpit
+    Description: A string definining the environment to be deployed
+    AllowedPattern: '[\w]*'
+    ConstraintDescription: "Must not have spaces or special characters"
+
+Resources:
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "${ CognitoFriendlyName }-${ env }"
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+        UnusedAccountValidityDays: 7
+      UsernameAttributes:
+        - none
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: false
+          Required: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+      UserPoolTags:
+        Name: !Sub "${ CognitoFriendlyName }-${ env }"
+        Owner: cloudops
+        Service: cognito
+        Environment: !Ref env
+
+  CognitoIdentityPool:
+    Type: AWS::Cognito::IdentityPool
+    Properties:
+      IdentityPoolName: !Sub "${ CognitoFriendlyName }${ env }"
+      AllowUnauthenticatedIdentities: false 
+
+  CognitoUnauthenticatedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: CognitoUnauthenticatedPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - mobileanalytics:PutEvents
+                  - cognito-sync:*
+                Resource:
+                  - "*"
+
+  CognitoAuthenticatedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: CognitoAuthenticatedPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - mobileanalytics:PutEvents
+                  - cognito-sync:"*"
+                  - cognito-idenity:*
+                Resource:
+                  - "*"
+
+  CognitoIdentityPoolRoleAttachment:
+    DependsOn:
+      - CognitoIdentityPool
+      - CognitoUnauthenticatedRole
+      - CognitoAuthenticatedRole
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+    Properties:
+      IdentityPoolId: !Ref CognitoIdentityPool
+      Roles:
+        authenticated: !GetAtt CognitoAuthenticatedRole.Arn
+        unauthenticated: !GetAtt CognitoUnauthenticatedRole.Arn
+
+Outputs:
+  CognitoUserPool:
+    Description: Cognito User Pool ID
+    Value: !Ref CognitoUserPool
+    Export:
+      Name: !Sub "${ AWS::StackName }-CognitoUserPool-id"
+
+  CognitoUserPoolArn:
+    Description: Cognito User Pool ARN
+    Value: !GetAtt CognitoUserPool.Arn
+    Export:
+      Name: !Sub "${ AWS::StackName }-CognitoUserPool-arn"
+
+  CognitoIdentityPool:
+    Description: Cognito Identity Pool ID
+    Value: !Ref CognitoIdentityPool
+    Export:
+      Name: !Sub "${ AWS::StackName }-CognitoIdentityPool-id"
+---

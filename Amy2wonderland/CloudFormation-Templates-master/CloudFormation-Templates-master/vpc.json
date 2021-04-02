@@ -1,0 +1,41 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "",
+    "Metadata": {
+
+    },
+    "Parameters": {
+
+    },
+    "Mappings": {
+
+    },
+    "Conditions": {
+
+    },
+    "Resources": {
+"name": {
+  "Type": "AWS::EC2::VPC",
+  "Properties": {
+    "CidrBlock": "----/--",
+    "Tags": [-]
+  }
+  "igwName": {
+    "Type": "AWS::EC2::InternetGateway",
+    "Properties": {
+      "Tags": ["-"]
+    }
+  },
+  "AttachGateway": {
+    "Type": "AWS::EC2::VPCGatewayAttachment",
+    "Properties": {
+      "VpcId": "--",
+      "InternetGatewayId": { "Ref": "igwName" }
+    }
+  }
+}
+    },
+    "Outputs": {
+
+    }
+}

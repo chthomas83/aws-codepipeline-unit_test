@@ -1,0 +1,117 @@
+---
+# The left peer is the initiator of the peering.
+# Routes will be created between the application subnets in each VPC
+Description: VPC peering
+
+Parameters:
+  LeftPeerEnvironment:
+    Description: Peering initiator base environment name
+    Type: String
+  LeftPeerAccountNumber:
+    Description: Peering initiator AWS account number
+    Type: String
+  LeftPeerVPCId:
+    Description: Peering initiator VPC ID
+    Type: String
+  LeftPeerCIDR:
+    Description: Peering initiator VPC CIDR
+    Type: String
+  LeftPeerConnectionID:
+    Type: String
+  LeftPeerApplicationASubnet:
+    Type: String
+  LeftPeerApplicationBSubnet:
+    Type: String
+
+  RightPeerEnvironment:
+    Description: Peering receiver base environment name
+    Type: String
+  RightPeerAccountNumber:
+    Description: Peering receiver AWS account number
+    Type: String
+  RightPeerVPCId:
+    Description: Peering receiver VPC ID
+    Type: String
+  RightPeerRoleARN:
+    Description: Peering receiver role to accept VPC peer from initiator account
+    Type: String
+  RightPeerCIDR:
+    Description: Peering receiver VPC CIDR
+    Type: String
+  RightPeerApplicationASubnet:
+    Type: String
+  RightPeerApplicationBSubnet:
+    Type: String
+
+Resources:
+  ApplicationSubnetAPeerRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Fn::ImportValue:
+          !Sub "${RightPeerEnvironment}-application-subnet-a-routetable"
+      DestinationCidrBlock: !Ref LeftPeerApplicationASubnet
+      VpcPeeringConnectionId: !Ref LeftPeerConnectionID
+
+  ApplicationSubnetAPeerRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Fn::ImportValue:
+          !Sub "${RightPeerEnvironment}-application-subnet-a-routetable"
+      DestinationCidrBlock: !Ref LeftPeerApplicationBSubnet
+      VpcPeeringConnectionId: !Ref LeftPeerConnectionID
+
+  ApplicationSubnetBPeerRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Fn::ImportValue:
+          !Sub "${RightPeerEnvironment}-application-subnet-b-routetable"
+      DestinationCidrBlock: !Ref LeftPeerApplicationASubnet
+      VpcPeeringConnectionId: !Ref LeftPeerConnectionID
+
+  ApplicationSubnetBPeerRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Fn::ImportValue:
+          !Sub "${RightPeerEnvironment}-application-subnet-b-routetable"
+      DestinationCidrBlock: !Ref LeftPeerApplicationBSubnet
+      VpcPeeringConnectionId: !Ref LeftPeerConnectionID
+
+  MgmtSubnetAPeerRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Fn::ImportValue:
+          !Sub "${RightPeerEnvironment}-mgmt-subnet-a-routetable"
+      DestinationCidrBlock: !Ref LeftPeerApplicationASubnet
+      VpcPeeringConnectionId: !Ref LeftPeerConnectionID
+
+  MgmtSubnetAPeerRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Fn::ImportValue:
+          !Sub "${RightPeerEnvironment}-mgmt-subnet-a-routetable"
+      DestinationCidrBlock: !Ref LeftPeerApplicationBSubnet
+      VpcPeeringConnectionId: !Ref LeftPeerConnectionID
+
+  MgmtSubnetBPeerRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Fn::ImportValue:
+          !Sub "${RightPeerEnvironment}-mgmt-subnet-b-routetable"
+      DestinationCidrBlock: !Ref LeftPeerApplicationASubnet
+      VpcPeeringConnectionId: !Ref LeftPeerConnectionID
+
+  MgmtSubnetBPeerRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Fn::ImportValue:
+          !Sub "${RightPeerEnvironment}-mgmt-subnet-b-routetable"
+      DestinationCidrBlock: !Ref LeftPeerApplicationBSubnet
+      VpcPeeringConnectionId: !Ref LeftPeerConnectionID

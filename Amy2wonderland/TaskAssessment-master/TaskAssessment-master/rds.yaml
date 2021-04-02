@@ -1,0 +1,437 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Website RDS instance'
+##########################################################
+# This template need to be executed in each environment to reduce the resource cost
+# To prepare RDS instance and security groups for the Website CF template
+##########################################################
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label: 
+          default: '0 Global Parameters'
+        Parameters:
+          - 'NetworkStack'
+          - 'Environment'
+          - 'EnvironmentNumber'
+          - 'Application'
+          - 'Product'
+          - 'Owner'
+      - Label:
+          default: '1 RDS Parameters'
+        Parameters:
+          - 'DBMasterUsername'
+          - 'DBMasterPassword'
+          - 'DBEngineVersion'
+          - 'DBMajorEngineVersion'
+          - 'DBBackupRetentionPeriod'
+          - 'DBLicenseModel'
+          - 'DBAllocatedStorageIOPS'
+          - 'DBSnapshotIdentifier'
+      - Label:
+          default: '2 DMS Parameter'
+        Parameters:
+          - 'DMSTargetDBUserPassword'
+
+###################################################
+#Mappings
+###################################################
+Mappings:
+  RDSMap:
+    prod:
+      DBSize: 'db.m4.large'
+      DBEngine: 'sqlserver-se'
+      MultiAZFlag: true
+      StorageType: 'io1'
+      StorageSize: 200
+      EncryptionFlag: true
+    dev: 
+      DBSize: 'db.t2.small'
+      DBEngine: 'sqlserver-ex'
+      MultiAZFlag: false
+      StorageType: 'standard'
+      StorageSize: 20
+      EncryptionFlag: false
+    sandpit: 
+      DBSize: 'db.t2.small'
+      DBEngine: 'sqlserver-ex'
+      MultiAZFlag: false
+      StorageType: 'standard'
+      StorageSize: 20
+      EncryptionFlag: false
+###################################################
+Conditions: 
+  HasSnapshot: !Not [!Equals [!Ref DBSnapshotIdentifier, '']]
+  UseKMSKey: !Not [!Equals [!FindInMap [RDSMap, !Ref Environment, DBEngine],'sqlserver-ex']]
+  CreateDMS: !Not [!Equals [!Ref DMSTargetDBUserPassword, '']]
+
+###################################################
+Parameters:
+  NetworkStack:
+    Description: 'Network stack prefix'
+    Type: 'String'
+  Environment:
+    Description: 'prod,dev,test,training,sandpit'
+    Type: 'String'
+    Default: 'sandpit'
+    AllowedValues:
+      - 'prod'
+      - 'dev'
+      - 'sandpit'
+  EnvironmentNumber:
+    Type: 'Number'
+    MinValue: 0
+    MaxValue: 99
+  Application:
+    Description: 'Application Name in Lowercase or Number'
+    Type: 'String'
+    Default: 'websiteebsite'
+    AllowedPattern: '[-a-z0-9]*'
+    ConstraintDescription: 'Lowercase characters and numbers only'
+  Product:
+    Type: 'String'
+    AllowedPattern: '[-a-z0-9]*'
+  Owner:
+    Description: 'Owner Email address'
+    Type: 'String'
+    AllowedPattern: '.+@[a-z0-9]+[-.a-z0-9]*(\\.)*'
+  DBMasterUsername:
+    Description: 'Website DB Master User'
+    Type: 'String'
+    NoEcho: true
+    Default: ''
+  DBMasterPassword:
+    Description: 'Website DB Master User Password'
+    Type: 'String'
+    NoEcho: true
+  DBSnapshotIdentifier: 
+    Description: '(Optional)DB snapshot ARN to restore DB'
+    Type: 'String'
+  DBBackupRetentionPeriod:
+    Description: 'Backup retention days'
+    Type: 'String'
+    Default: 0
+  DBEngineVersion:
+    Description: 'Version number of the database engine'
+    Type: 'String'
+    Default: '14.00.3015.40.v1'
+  DBLicenseModel:
+    Description: 'BYO Licences must be added before deployment'
+    Type: 'String'
+    AllowedValues:
+      - 'license-included'
+      - 'bring-your-own-license'
+    Default: 'license-included'
+  DBMajorEngineVersion:
+    Description: 'Parameter Group Default Family'
+    Type: 'String'
+    Default: '14.0'
+  DBAJumpboxCidr:
+    Description: 'DBA Jumpbox Cidr'
+    Type: 'String'
+    Default: '10.32.35.18/32'
+  DBAllocatedStorageIOPS:
+    Description: 'The number of I/O operations per second (IOPS)'
+    Type: 'Number'
+    MinValue: 1000
+  DMSTargetDBUserPassword:
+    Description: '(Optional)DMS Target DB user password'
+    Type: 'String'
+    NoEcho: true
+
+###################################################
+Resources:
+###################################################
+#SSM Parameterstore
+###################################################
+  SSMDBMasterUser:
+    Type: 'AWS::SSM::Parameter'
+    Properties: 
+      Name: !Sub '/${Application}/${Environment}${EnvironmentNumber}/MasterDatabaseConnection/User'
+      Type: 'String'
+      Value: !Ref 'DBMasterUsername'
+  SSMDBMasterUserPassword:
+    Type: 'AWS::SSM::Parameter'
+    Properties: 
+      Name: !Sub '/${Application}/${Environment}${EnvironmentNumber}/MasterDatabaseConnection/Password'
+      Type: 'String'
+      Value: !Ref 'DBMasterPassword'
+  SSMDBServer:
+    Type: 'AWS::SSM::Parameter'
+    Properties: 
+      Name: !Sub '/${Application}/${Environment}${EnvironmentNumber}/MasterDatabaseConnection/Server'
+      Type: 'String'
+      Value: !Ref 'RDSRecordSet'
+  SSMDMSTargetDBUserPassword:
+    Type: 'AWS::SSM::Parameter'
+    Condition: 'CreateDMS'
+    Properties: 
+      Name: !Sub '/${Application}/${Environment}${EnvironmentNumber}/DMSParameter/TargetUserPassword'
+      Type: 'String'
+      Value: !Ref 'DMSTargetDBUserPassword'
+
+###################################################
+#Roles
+###################################################
+  RDSMSSQLMonitoringRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub '${Application}-${Environment}-${EnvironmentNumber}-rds-role'
+      Path: /service-role/
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - monitoring.rds.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+
+###################################################
+#VPC Security Groups
+###################################################
+  SGwebsiteRDSGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupName: !Sub '${Application}-${Environment}-${EnvironmentNumber}-rds_${Product}'
+      GroupDescription: !Sub 'RDS-MSSQL-${EnvironmentNumber}'
+      VpcId: !ImportValue 
+        'Fn::Sub': '${NetworkStack}-vpcid'
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: '0.0.0.0/0'
+      SecurityGroupIngress:
+        - FromPort: 1433
+          ToPort: 1433
+          IpProtocol: 'tcp'
+          CidrIp: !Sub ${DBAJumpboxCidr}
+          Description: 'For production DBA jumpbox'
+      Tags: 
+        - Key: 'Name'
+          Value: !Sub '${Application}-${Environment}-${EnvironmentNumber}-rds_${Product}'
+        - Key: 'Service'
+          Value: 'sg'
+        - Key: 'Environment'
+          Value: !Sub ${Environment}
+        - Key: 'Application'
+          Value: !Sub ${Application}
+        - Key: 'Product'
+          Value: !Sub ${Product}
+        - Key: 'Role'
+          Value: 'rds'
+        - Key: 'Owner'
+          Value: !Sub ${Owner}
+      SecurityGroupIngress:
+        - Ref: AWS::NoValue
+      Tags: 
+        - Key: 'Name'
+          Value: !Sub '${Application}-${Environment}-${EnvironmentNumber}-lambda_securitygroup_${Product}'
+        - Key: 'Service'
+          Value: 'sg'
+        - Key: 'Environment'
+          Value: !Sub ${Environment}
+        - Key: 'Application'
+          Value: !Sub ${Application}
+
+###################################################
+#RDS Instance and Subnet Group
+###################################################
+  websiteDbInstance:
+    Type: 'AWS::RDS::DBInstance'
+    DeletionPolicy: 'Snapshot'
+    Properties:
+      AllocatedStorage: !FindInMap [RDSMap, !Ref Environment, StorageSize]
+      DBInstanceClass: !FindInMap [RDSMap, !Ref Environment, DBSize]
+      DBSubnetGroupName: !Ref 'websiteRDSSubnetGroup'
+      DBInstanceIdentifier: !Sub '${Application}-${Environment}-${EnvironmentNumber}-rds${Product}'
+      Engine: !FindInMap [RDSMap, !Ref Environment, DBEngine]
+      MultiAZ: !FindInMap [RDSMap, !Ref Environment, MultiAZFlag]
+      BackupRetentionPeriod: !Ref 'DBBackupRetentionPeriod'
+      LicenseModel: !Ref 'DBLicenseModel'
+      StorageType: !FindInMap [RDSMap, !Ref Environment, StorageType]
+      AllowMajorVersionUpgrade: false
+      AutoMinorVersionUpgrade: true
+      CopyTagsToSnapshot: true
+      EngineVersion: !Ref 'DBEngineVersion'
+      MasterUserPassword: !Ref 'DBMasterPassword'
+      MasterUsername: !Ref 'DBMasterUsername'
+      VPCSecurityGroups:
+        - !GetAtt 'websiteRDSGroup.GroupId'
+      DBSnapshotIdentifier: !If [HasSnapshot, !Ref DBSnapshotIdentifier, !Ref "AWS::NoValue"]
+      Iops: !If [UseKMSKey, !Ref DBAllocatedStorageIOPS, !Ref "AWS::NoValue"]
+      DBParameterGroupName: !Ref RDSMSSQLParameterGroup
+      KmsKeyId: !If [UseKMSKey, !Ref RDSMSSQLKMSKey, !Ref "AWS::NoValue"]
+      PreferredBackupWindow: '14:00-15:00'
+      PreferredMaintenanceWindow: 'sat:15:00-sat:17:00'
+      PubliclyAccessible: false
+      StorageEncrypted: !FindInMap [RDSMap, !Ref Environment, EncryptionFlag]
+      Timezone: 'AUS Eastern Standard Time'
+      EnablePerformanceInsights: true
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt 
+        - RDSMSSQLMonitoringRole
+        - Arn
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Application}-${Environment}-${EnvironmentNumber}-rds_${Product}'
+        - Key: 'Service'
+          Value: 'dbinstance'
+        - Key: 'Environment'
+          Value: !Sub ${Environment}
+        - Key: 'Application'
+          Value: !Sub ${Application}
+        - Key: 'Product'
+          Value: !Sub ${Product}
+        - Key: 'Role'
+          Value: 'rds'
+        - Key: 'Owner'
+          Value: !Sub ${Owner}
+  websiteRDSSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: !Sub '${Application}-${Environment}-${EnvironmentNumber}'
+      SubnetIds:
+        - !ImportValue 
+          'Fn::Sub': '${NetworkStack}-data-subnet-a-id'
+        - !ImportValue 
+          'Fn::Sub': '${NetworkStack}-data-subnet-b-id'
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Application}-${Environment}-${EnvironmentNumber}-rds_subnet_${Product}'
+        - Key: 'Service'
+          Value: 'subnetgroup'
+        - Key: 'Environment'
+          Value: !Sub ${Environment}
+        - Key: 'Application'
+          Value: !Sub ${Application}
+        - Key: 'Product'
+          Value: !Sub ${Product}
+        - Key: 'Role'
+          Value: 'rds'
+        - Key: 'Owner'
+          Value: !Sub ${Owner}
+  RDSMSSQLKMSKey:
+    Type: 'AWS::KMS::Key'
+    Condition: 'UseKMSKey'
+    Properties:
+      Description: !Sub 'RDSMSSQL-${Application}-${Environment}${EnvironmentNumber}'
+      Enabled: true
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: !Sub 'HVR-${Application}-${Environment}${EnvironmentNumber}'
+        Statement:
+          - Sid: >-
+              Allow access through RDS for all principals in the account that
+              are authorized to use RDS
+            Effect: Allow
+            Principal:
+              AWS: '*'
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:CreateGrant'
+              - 'kms:ListGrants'
+              - 'kms:DescribeKey'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'kms:CallerAccount': !Sub '${AWS::AccountId}'
+                'kms:ViaService': !Sub 'rds.${AWS::Region}.amazonaws.com'
+                'kms:ViaService': !Sub 'dms.${AWS::Region}.amazonaws.com'                
+          - Sid: Allow direct access to key metadata to the account
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action:
+              - 'kms:*'
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${Application}-${Environment}-${EnvironmentNumber}-kms_key_${Product}'
+        - Key: Service
+          Value: kms
+        - Key: Environment
+          Value: !Sub ${Environment}
+        - Key: Application
+          Value: !Sub ${Application}
+        - Key: Product
+          Value: !Sub ${Product}
+        - Key: Role
+          Value: key
+        - Key: Owner
+          Value: !Sub ${Owner}
+  RDSMSSQLKMSAlias:
+    Type: AWS::KMS::Alias
+    Condition: 'UseKMSKey'
+    Properties:
+      AliasName: !Sub 'alias/${Application}-${Environment}-${EnvironmentNumber}-mssql-key'
+      TargetKeyId: !Ref 'RDSMSSQLKMSKey'          
+  RDSMSSQLParameterGroup:
+    Type: 'AWS::RDS::DBParameterGroup'
+    Properties:
+      Description: !Sub 'RDSMSSQL-${Application}-${Environment}${EnvironmentNumber}'
+      Family: !Join
+      - '-'
+      - - !FindInMap [RDSMap, !Ref Environment, DBEngine]
+        - !Sub '${DBMajorEngineVersion}'
+      Parameters:
+        rds.force_ssl: '1'
+      Tags:
+        - Key: Name
+          Value: !Sub '${Application}-${Environment}-${EnvironmentNumber}-rds_prametergroup_${Product}'
+        - Key: Service
+          Value: rds
+        - Key: Environment
+          Value: !Sub ${Environment}
+        - Key: Application
+          Value: !Sub ${Application}
+        - Key: Product
+          Value: !Sub ${Product}
+        - Key: Role
+          Value: parametergroup
+        - Key: Owner
+          Value: !Sub ${Owner}   
+
+###################################################
+#Route 53 Private record set for DB endpoint
+###################################################
+  RDSRecordSet:
+    Type: 'AWS::Route53::RecordSet'
+    Properties:
+      Comment: 'DB endpoint private DNS record'
+      Name: !Join 
+        - .
+        - - 'Fn::Sub': '${Application}-${Environment}-${EnvironmentNumber}-db'
+          - !ImportValue 
+            'Fn::Sub': '${NetworkStack}-subdomain'
+      Type: 'CNAME'
+      TTL: '30'
+      ResourceRecords:
+        - !GetAtt 
+          - 'websiteDbInstance'
+          - 'Endpoint.Address'
+      HostedZoneId: !ImportValue 
+        'Fn::Sub': '${NetworkStack}-subdomain-r53-id'
+
+###################################################
+#Outputs
+###################################################
+Outputs:
+  RDSEndpoint:
+    Description: 'website RDS Endpoint DNS Record'
+    Value: !Ref 'RDSRecordSet'
+    Export: 
+      Name: !Sub '${Application}-${Environment}-${EnvironmentNumber}-db-endpoint'
+  KMSKeyID:
+    Condition: 'UseKMSKey'
+    Description: 'website KMS Encryption key ID'
+    Value: !Ref 'RDSMSSQLKMSKey'
+    Export:
+      Name: !Sub '${Application}-${Environment}-${EnvironmentNumber}-kms-keyid'
+---  

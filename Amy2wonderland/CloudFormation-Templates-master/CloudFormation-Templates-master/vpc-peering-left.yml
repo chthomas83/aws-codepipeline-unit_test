@@ -1,0 +1,78 @@
+---
+# The left peer is the initiator of the peering.
+# Routes will be created between the application subnets in each VPC
+Description: VPC peering
+
+Parameters:
+  LeftPeerEnvironment:
+    Description: Peering initiator base environment name
+    Type: String
+  LeftPeerAccountNumber:
+    Description: Peering initiator AWS account number
+    Type: String
+  LeftPeerVPCId:
+    Description: Peering initiator VPC ID
+    Type: String
+  LeftPeerCIDR:
+    Description: Peering initiator VPC CIDR
+    Type: String
+  LeftPeerApplicationASubnet:
+    Type: String
+  LeftPeerApplicationBSubnet:
+    Type: String
+
+  RightPeerEnvironment:
+    Description: Peering receiver base environment name
+    Type: String
+  RightPeerAccountNumber:
+    Description: Peering receiver AWS account number
+    Type: String
+  RightPeerVPCId:
+    Description: Peering receiver VPC ID
+    Type: String
+  RightPeerRoleARN:
+    Description: Peering receiver role to accept VPC peer from initiator account
+    Type: String
+  RightPeerCIDR:
+    Description: Peering receiver VPC CIDR
+    Type: String
+  RightPeerApplicationASubnet:
+    Type: String
+  RightPeerApplicationBSubnet:
+    Type: String
+
+Resources:
+  LeftVPCPeer:
+    Type: "AWS::EC2::VPCPeeringConnection"
+    Properties:
+      PeerVpcId: !Ref RightPeerVPCId
+      VpcId: !Ref LeftPeerVPCId
+      PeerOwnerId: !Ref RightPeerAccountNumber
+      PeerRoleArn: !Ref RightPeerRoleARN
+
+  ApplicationSubnetAPeerRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Fn::ImportValue:
+          !Sub "${LeftPeerEnvironment}-application-subnet-a-routetable"
+      DestinationCidrBlock: !Ref RightPeerCIDR
+      VpcPeeringConnectionId: !Ref LeftVPCPeer
+    DependsOn: LeftVPCPeer
+
+  ApplicationSubnetBPeerRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Fn::ImportValue:
+          !Sub "${LeftPeerEnvironment}-application-subnet-b-routetable"
+      DestinationCidrBlock: !Ref RightPeerCIDR
+      VpcPeeringConnectionId: !Ref LeftVPCPeer
+    DependsOn: LeftVPCPeer
+
+Outputs:
+  LeftVPCPeerID:
+    Description: Left VPC Peer ID
+    Value: !Ref LeftVPCPeer
+    Export:
+      Name: !Join [ "-", [!Ref LeftPeerEnvironment, 'to', !Ref RightPeerEnvironment, "peer-id"] ]

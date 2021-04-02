@@ -1,0 +1,41 @@
+Install Linux Subsystem and Ansible on Windows OS
+
+1. https://docs.microsoft.com/en-us/windows/wsl/install-win10
+2. sudo apt-get install python-pip
+3. sudo apt-get update
+4. sudo pip install ansible
+5. pip install boto3 botocore
+6. pip install awscli
+
+
+
+
+Ansible Script:
+AWS_PROFILE=saml ansible-playbook deploy.yaml --extra-vars "application=imageresizer product=ppw role=test owner=mate.gabri@jhg.com.au GitHubRepo=dev-src-aws-imageresizer GitHubBranch='feature/use-ansibile-for-deployment' env=sandpit"
+
+https://github.com/johnhollandgroup/codepipeline-cloudformation-skeleton
+https://github.com/johnhollandgroup/dev-src-aws-imageresizer.git
+https://jhg.okta.com/home/amazon_aws/0oa1c6uvycftyxR0E1d8/272
+
+https://johnholland.atlassian.net/wiki/spaces/JHGD/pages/356712449/saml2aws+on+Linux+subsystem+for+Windows
+
+
+
+Run Saml2AWS on Linux:
+
+$cd /mnt/c/users
+
+Installing saml2aws on Linux:
+sudo apt-get install golang git
+PATH=~/go/bin:$PATH go get github.com/versent/saml2aws
+cd ~/go/src/github.com/versent/saml2aws/
+PATH=~/go/bin:$PATH make deps
+PATH=~/go/bin:$PATH make install
+
+PATH=~/go/bin:$PATH saml2aws
+
+saml2aws configure
+ 
+
+
+AWS_PROFILE=saml ansible-playbook deploy.yaml --extra-vars "application=imageresizer product=ppw role=test owner=mate.gabri@jhg.com.au GitHubRepo=dev-src-aws-imageresizer GitHubBranch='feature/use-ansibile-for-deployment' env=sandpit"

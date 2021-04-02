@@ -1,0 +1,185 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: VPC code pipeline
+
+Parameters:
+  GitHubUser:
+    Type: String
+  GitHubRepo:
+    Type: String
+  GitHubBranch:
+    Type: String
+  GitHubToken:
+    Type: String
+
+Resources:
+
+  AppPipeline:
+    Type: "AWS::CodePipeline::Pipeline"
+    Properties:
+      RoleArn: !Sub ${ PipelineServiceRole.Arn }
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: JHGNetworkCF
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              Configuration:
+                Owner: !Ref GitHubUser
+                Repo: !Ref GitHubRepo
+                Branch: !Ref GitHubBranch
+                OAuthToken: !Ref GitHubToken
+              OutputArtifacts:
+                - Name: App
+              RunOrder: 1
+        - Name: ApproveDeployment
+          Actions:
+            - Name: ApproveDeployment
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: 1
+                Provider: Manual
+              Configuration:
+                NotificationArn: !Ref CloudOpsApprovalTopic
+              RunOrder: 2
+        - Name: DeployNpVPCs
+          Actions:
+            - Name: DeployNpVPCs
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProjectNonProd
+              InputArtifacts:
+                - Name: App
+              RunOrder: 1
+      ArtifactStore:
+        Type: S3
+        Location:
+          Ref: ArtifactStoreS3Location
+
+  CodeBuildProjectNonProd:
+    Type: "AWS::CodeBuild::Project"
+    Properties:
+      Name: !Sub BuildFactory-VPC-Deploy-NP-${AWS::StackName}
+      Description: Deployment of JHG AWS Non Prod VPCs
+      Artifacts:
+        Type: "CODEPIPELINE"
+      Source:
+        Type: "CODEPIPELINE"
+        BuildSpec: code-pipeline/buildspec.np.yml
+      Environment:
+        ComputeType: "BUILD_GENERAL1_LARGE"
+        Image: "aws/codebuild/python:2.7.12"
+        Type: "LINUX_CONTAINER"
+      ServiceRole: !Ref CodeBuildServiceRole
+
+  PipelineServiceRole:
+    Type: AWS::IAM::Role
+    DependsOn: CloudOpsApprovalTopic
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+            - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+              - codepipeline.amazonaws.com
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess #this is too permissive
+      Policies:
+        - PolicyName: CodePipelineAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                - iam:PassRole
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                - sns:Publish
+                Resource:
+                - !Ref CloudOpsApprovalTopic
+              - Effect: Allow
+                Resource:
+                - !Sub arn:aws:logs:*:${AWS::AccountId}:log-group:/aws/codebuild/*
+                Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              - Effect: Allow
+                Action:
+                - codebuild:StartBuild
+                - codebuild:BatchGetBuilds
+                Resource:
+                - !Sub ${ CodeBuildProjectNonProd.Arn }
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+            - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+              - codebuild.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: CodeBuildAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Resource:
+                - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+                Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+
+              - Effect: Allow
+                Resource:
+                - !Sub 'arn:aws:s3:::${ArtifactStoreS3Location}/*'
+                Action:
+                - s3:GetObject
+                - s3:GetObjectVersion
+                - s3:PutObject
+
+              - Effect: Allow
+                Resource:
+                - "*"
+                Action:
+                - ssm:GetParameters
+                - ssm:PutParameter
+
+              - Effect: Allow
+                Resource:
+                - "*"
+                - !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/bastion'
+                Action:
+                - kms:Encrypt
+
+              - Effect: Allow
+                Resource: arn:aws:iam::*:role/resource-orchestrator
+                Action:
+                - 'sts:AssumeRole'
+
+  CloudOpsApprovalTopic:
+    Type: "AWS::SNS::Topic"
+
+
+  ArtifactStoreS3Location:
+    Type: AWS::S3::Bucket
