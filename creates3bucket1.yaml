@@ -1,0 +1,38 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters: 
+  BucketName: 
+    Default: mys3jayaj00110111
+    Type: String
+Resources:  
+  mys3bucket01:  
+    Type: AWS::S3::Bucket 
+    Properties:
+        BucketName: !Ref BucketName
+        # AccessControl: PublicRead
+  BucketPolicy01:  
+    Type: AWS::S3::BucketPolicy 
+    Properties:  
+      Bucket: 
+        Ref: mys3bucket01 
+      PolicyDocument:  
+        Statement:  
+        -  
+          Sid: "AllowIPs"  
+          Action:  
+            - "s3:*"  
+          Effect: "Deny"  
+          Resource:  
+            Fn::Join:  
+              - ""  
+              -  
+                - "arn:aws:s3:::"  
+                -  
+                  Ref: "mys3bucket01"  
+                - "/*"  
+          Principal: "*"  
+          Condition:  
+            NotIpAddress:
+                aws:SourceIp: 
+                - 192.168.143.0/24
+                - 192.168.145.0/24
+ 
